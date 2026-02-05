@@ -1,7 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./firebase";
 
 import Home from "./pages/Home";
 import DreamFarm from "./pages/DreamFarm";
@@ -17,19 +15,18 @@ import NetworkStatus from "./pages/NetworkStatus";
 
 // Komponen Pembungkus Keamanan
 function ProtectedRoute({ children }) {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Kita cek status login dari localStorage agar bisa kerja offline
+  const [isAuthenticated, setIsAuthenticated] = useState(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    const authStatus = localStorage.getItem("isLoggedIn");
+    setIsAuthenticated(authStatus === "true");
   }, []);
 
-  if (loading) return <div className="min-h-screen bg-gray-900 flex items-center justify-center text-white">Loading...</div>;
-  if (!user) return <Navigate to="/login" replace />;
+  if (isAuthenticated === null) return <div className="min-h-screen bg-gray-900 flex items-center justify-center text-white">Loading...</div>;
+  
+  // Jika belum login, lempar ke halaman login
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   return children;
 }

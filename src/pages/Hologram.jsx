@@ -1,6 +1,5 @@
-import { ref, onValue, set } from "firebase/database";
 import { useEffect, useState } from "react";
-import { db } from "../firebase";
+import { socket } from "../socket"; // Pastikan file socket.js sudah dibuat
 import {
   PlayIcon,
   ClockIcon,
@@ -38,17 +37,27 @@ export default function Hologram() {
   const [liveTimers, setLiveTimers] = useState({});
 
   /* =========================
-      REALTIME LISTENER
+      REALTIME LISTENER (SOCKET.IO)
   ========================== */
   useEffect(() => {
-    const unsub = onValue(ref(db, "wahana"), (snap) => {
-      setAllWahana(snap.val() || {});
+    // Ambil data saat pertama kali konek
+    socket.on("initData", (db) => {
+      setAllWahana(db.wahana || {});
     });
-    return () => unsub();
+
+    // Ambil data setiap kali ada perubahan di server
+    socket.on("dataChanged", (db) => {
+      setAllWahana(db.wahana || {});
+    });
+
+    return () => {
+      socket.off("initData");
+      socket.off("dataChanged");
+    };
   }, []);
 
   /* =========================
-      LIVE TIMER
+      LIVE TIMER (TETAP SAMA)
   ========================== */
   useEffect(() => {
     const intervals = {};
@@ -102,12 +111,10 @@ export default function Hologram() {
   };
 
   /* =========================
-      MAIN FLOW
+      MAIN FLOW (SOCKET EMIT)
   ========================== */
   const handleClick = (key) => {
-    const data = allWahana[key];
-    if (!data) return;
-
+    const data = allWahana[key] || { batch: 1, group: 1, step: 0 };
     let { batch, group, step, startTime = null } = data;
     const now = Date.now();
 
@@ -119,7 +126,11 @@ export default function Hologram() {
     } else if (step === 2) {
       if (startTime) {
         const duration = calcDuration(startTime);
-        set(ref(db, `logs/${key}/batch${batch}/group${group}`), { duration });
+        // Kirim log ke server via socket
+        socket.emit("updateData", {
+          path: `logs/${key}/batch${batch}/group${group}`,
+          value: { duration }
+        });
       }
 
       step = 0;
@@ -132,21 +143,21 @@ export default function Hologram() {
       }
     }
 
-    set(ref(db, `wahana/${key}`), {
-      ...data,
-      batch,
-      group,
-      step,
-      startTime,
+    // Kirim update status wahana ke server via socket
+    socket.emit("updateData", {
+      path: `wahana/${key}`,
+      value: {
+        ...data,
+        batch,
+        group,
+        step,
+        startTime,
+      }
     });
   };
 
-  /* =========================
-      UI
-  ========================== */
   return (
     <div className="min-h-screen bg-gray-900 text-white px-4 py-6">
-
       {/* HEADER */}
       <div className="text-center mb-6">
         <h1 className="text-2xl font-bold text-yellow-400">
@@ -157,9 +168,9 @@ export default function Hologram() {
         </p>
       </div>
 
-      {/* STATUS 9 WAHANA (ADA BATCH & GROUP) */}
-      <div className="grid grid-cols-4 gap-4 mb-10">
-        {[1,2,3,4,5,6,7,8,9].map((i) => {
+      {/* STATUS 9 WAHANA */}
+      <div className="grid grid-cols-4 md:grid-cols-9 gap-4 mb-10">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => {
           const data = allWahana[`wahana${i}`];
           return (
             <div key={i} className="flex flex-col items-center text-center">
@@ -168,14 +179,9 @@ export default function Hologram() {
                   B{data.batch} • G{data.group}
                 </div>
               )}
-
-              <div
-                className={`w-10 h-10 rounded-full ${getColor(data?.step)}
-                flex items-center justify-center`}
-              >
+              <div className={`w-10 h-10 rounded-full ${getColor(data?.step)} flex items-center justify-center`}>
                 {getStatusIcon(data?.step)}
               </div>
-
               <span className="text-[11px] mt-1 opacity-80">
                 {WAHANA_NAME[i]}
               </span>
@@ -192,50 +198,33 @@ export default function Hologram() {
 
           return (
             <div key={key} className="bg-gray-800 rounded-xl p-6 text-center">
-
               <h2 className="text-lg font-bold text-yellow-400 mb-1">
                 {HOLOGRAMS[key]}
               </h2>
-
               {data && (
                 <p className="text-sm mb-6 text-gray-300">
                   Batch {data.batch} • Group {data.group}
                 </p>
               )}
-
-              {/* MAIN BUTTON */}
               <button
                 onClick={() => handleClick(key)}
-                className={`w-32 h-32 rounded-full mx-auto mb-4
-                flex items-center justify-center shadow-xl
-                ${getColor(data?.step)}`}
+                className={`w-32 h-32 rounded-full mx-auto mb-4 flex items-center justify-center shadow-xl transition-transform active:scale-90 ${getColor(data?.step)}`}
               >
                 {(data?.step === 1 || data?.step === 2) ? (
                   <div className="flex flex-col items-center">
-                    <ClockIcon
-                      className={`w-6 h-6 ${
-                        data.step === 2 ? "text-white" : "text-black"
-                      }`}
-                    />
-                    <span
-                      className={`text-xl font-mono font-bold ${
-                        data.step === 2 ? "text-white" : "text-black"
-                      }`}
-                    >
-                      {String(time.minutes).padStart(2, "0")}:
-                      {String(time.seconds).padStart(2, "0")}
+                    <ClockIcon className={`w-6 h-6 ${data.step === 2 ? "text-white" : "text-black"}`} />
+                    <span className={`text-xl font-mono font-bold ${data.step === 2 ? "text-white" : "text-black"}`}>
+                      {String(time.minutes).padStart(2, "0")}:{String(time.seconds).padStart(2, "0")}
                     </span>
                   </div>
                 ) : (
                   <PlayIcon className="w-10 h-10 text-gray-600" />
                 )}
               </button>
-
             </div>
           );
         })}
       </div>
-
       <Footer />
     </div>
   );
